@@ -1,0 +1,66 @@
+---
+- name: config | ensure default conf is empty
+  copy:
+    dest: /etc/nginx/conf.d/default.conf
+    mode: '0664'
+    content: |
+      # Ansible managed. This file serves as a placeholder
+      # So when Nginx is updated this file is not overwritten
+
+- name: config | set default conf
+  template:
+    src: nginx.conf.j2
+    dest: /etc/nginx/nginx.conf
+    mode: '0644'
+  register: nginx_set_default_conf
+
+- name: config | set vhosts
+  template:
+    src: vhosts.j2
+    dest: "/etc/nginx/conf.d/{{ item.server_name.split(' ')[0] }}.conf"
+    mode: '0644'
+  loop: "{{ nginx_vhosts }}"
+  when: nginx_vhosts | length > 0
+  register: nginx_set_vhost
+
+- name: config | set fact for registered vhosts
+  set_fact:
+    nginx_registered_vhosts: |
+      {{ nginx_set_vhost.results |
+      selectattr('path', 'string') |
+      map(attribute='path') | list + nginx_set_vhost.results |
+      selectattr('dest', 'string') |
+      map(attribute='dest') | select | list }}
+  when: nginx_vhosts | length > 0
+
+- name: config | find vhost configuration files
+  find:
+    file_type: file
+    paths: /etc/nginx/conf.d/
+    use_regex: true
+    patterns: ^(?![0-9]{2}-.*$|^default.conf$).*\.conf$
+  register: vhost_files
+
+- name: config | remove unmanaged vhost configs
+  file:
+    path: "{{ item.path }}"
+    state: absent
+  loop: "{{ vhost_files.files }}"
+  when:
+    - nginx_del_unmanaged_conf
+    - item.path not in nginx_registered_vhosts
+  register: nginx_del_vhost
+
+- name: config | register nginx config check when a config changed
+  shell: nginx -t
+  when: |
+    nginx_set_default_conf.changed or
+    nginx_set_vhost.changed or
+    nginx_del_vhost is defined and nginx_del_vhost.changed
+  register: nginx_conf_check
+
+- name: config | reload nginx when config test is ok
+  systemd:
+    name: nginx
+    state: reloaded
+  when: nginx_conf_check is defined and nginx_conf_check.changed

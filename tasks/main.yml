@@ -1,0 +1,60 @@
+---
+- name: main | ensure nginx group is set
+  group:
+    name: nginx
+    gid: '10100'
+    system: true
+
+- name: main | ensure nginx user is set
+  user:
+    name: nginx
+    uid: '10100'
+    system: true
+    group: '10100'
+    comment: 'nginx user'
+    create_home: false
+    shell: /sbin/nologin
+
+- name: main | install dependencies
+  dnf:
+    name: "{{ nginx_dependencies }}"
+
+- name: main | set nginx rpm key
+  rpm_key:
+    fingerprint: 573BFD6B3D8FBC641079A6ABABF5BD827BD9BF62
+    key: https://nginx.org/keys/nginx_signing.key
+    validate_certs: true
+
+- name: main | configure nginx repo
+  template:
+    src: repo.j2
+    dest: /etc/yum.repos.d/nginx.repo
+    mode: '0644'
+
+- name: main | install nginx
+  dnf:
+    name: "nginx{{ nginx_version | default('') }}"
+    state: "{{ nginx_state }}"
+    disablerepo: "*"
+    enablerepo: nginx
+    update_cache: true
+
+- include_tasks: config.yml
+
+- name: main | ensure logrotate is installed when desired
+  dnf:
+    name: logrotate
+  when: nginx_custom_logrotate
+
+- name: main | set custom logrotate when desired
+  template:
+    src: logrotate.j2
+    dest: /etc/logrotate.d/nginx
+    mode: '0644'
+  when: nginx_custom_logrotate
+
+- name: main | ensure nginx is started and enabled
+  systemd:
+    name: nginx
+    state: started
+    enabled: true

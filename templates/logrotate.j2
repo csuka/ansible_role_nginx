@@ -1,0 +1,11 @@
+{{ ansible_managed | comment }}
+
+/var/log/nginx/*.log
+{
+{% for option in nginx_logrotate_options %}
+    {{ option }}
+{% endfor %}
+    postrotate
+    nginx -s reopen
+    endscript
+}
